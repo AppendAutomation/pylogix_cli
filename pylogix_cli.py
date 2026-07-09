@@ -55,7 +55,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pylogix
 from pylogix.lgx_response import Response
 from pylogix import PLC
-version = "0.1.9"
+version = "0.1.10"
 comm = PLC()
 output_format = "raw"
 output_formats = ["raw", "readable", "minimal"]
@@ -283,12 +283,13 @@ def readTagFile(args):
             print("Executed in {0:7.3f} seconds.".format(exec_time))
 
 def write(args):
-    words = args.split()
-    comm.Read(words[0])  # Always read the tag first since this will initiate the connection.
-    if isInteger(words[1]):
-        ret = comm.Write(words[0], int(words[1]))
+    words = args.split(maxsplit=1)  # split tag from value so string values may contain spaces.
+    tag, value = words[0], words[1]
+    comm.Read(tag)  # Always read the tag first since this will initiate the connection.
+    if isInteger(value):
+        ret = comm.Write(tag, int(value))
     else:
-            ret = comm.Write(words[0], words[1])
+        ret = comm.Write(tag, value)
     print(ret)
 
 def getVersion(args):
