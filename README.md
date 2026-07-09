@@ -6,7 +6,7 @@ handy for systems where an end-user does not have the Rockwell software, but nee
 Warning!  PLCs control industrial equipment and writing values to a PLC that is actively operating equipment should be done with great care and is at your own risk.
 
 Click below to download the current standalone executable for Windows 7/10:<br/>
-https://github.com/dhunt84971/pylogix_cli/releases/download/v0.1.9/pylogix_cli.exe 
+https://github.com/dhunt84971/pylogix_cli/releases/download/v0.1.10/pylogix_cli.exe 
 
 
 Execution of the application will take the form of a single command or a shell console application allowing multiple commands to be executed.
