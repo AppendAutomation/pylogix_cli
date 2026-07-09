@@ -286,10 +286,15 @@ def write(args):
     words = args.split(maxsplit=1)  # split tag from value so string values may contain spaces.
     tag, value = words[0], words[1]
     comm.Read(tag)  # Always read the tag first since this will initiate the connection.
-    if isInteger(value):
-        ret = comm.Write(tag, int(value))
-    else:
-        ret = comm.Write(tag, value)
+    try:
+        if isInteger(value):
+            ret = comm.Write(tag, int(value))
+        else:
+            ret = comm.Write(tag, value)
+    except Exception as e:
+        print("ERROR - Could not write value '{0}' to tag '{1}'.  "
+              "The value type may not match the tag's datatype.  ({2})".format(value, tag, e))
+        return
     print(ret)
 
 def getVersion(args):
