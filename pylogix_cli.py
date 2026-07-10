@@ -263,6 +263,10 @@ def read(args):
     decoded = decodeStringValue(ret.Value)
     if decoded is not None:
         ret.Value = decoded
+    # surround string values in single quotes so their boundaries are clear
+    # when the value contains spaces, e.g. MyStringTag 'Hello World' Success
+    if isinstance(ret.Value, str):
+        ret.Value = "'{}'".format(ret.Value)
     print(ret)
 
 def readTagFile(args):
