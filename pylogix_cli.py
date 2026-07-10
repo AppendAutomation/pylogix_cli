@@ -260,6 +260,9 @@ def getFaultInfo(args):
 
 def read(args):
     ret = comm.Read(args)
+    decoded = decodeStringValue(ret.Value)
+    if decoded is not None:
+        ret.Value = decoded
     print(ret)
 
 def readTagFile(args):
@@ -319,9 +322,10 @@ def validateTags(args):
 
 def output(args):
     global output_format
-    if (args in output_formats):
-        output_format = args
-        print("Output format set to {}".format(args))
+    fmt = args.casefold()
+    if (fmt in output_formats):
+        output_format = fmt
+        print("Output format set to {}".format(fmt))
     else:
         print("Invalid output format")
     return
@@ -395,11 +399,13 @@ def parseCommand(command):
             print("ERROR - Unrecognized command.  Enter Help for a list of commands.")
 
 def commandLoop():
-    command = input("pylogix_cli> ").casefold()
-    while (command != "quit" and command != "exit"):
+    # Keep the raw input so argument case is preserved (e.g. string values
+    # written to tags).  Command matching is done case-insensitively below.
+    command = input("pylogix_cli> ").strip()
+    while (command.casefold() != "quit" and command.casefold() != "exit"):
         parseCommand(command)
-        command = input("pylogix_cli> ").casefold()
-    if command == "exit":
+        command = input("pylogix_cli> ").strip()
+    if command.casefold() == "exit":
         print("I'll assume you meant quit.")
 
 #endregion COMMAND LOOP
@@ -426,18 +432,48 @@ def parseIPAndSlot(value):
     return ip, slot
 
 def getAdditionalArgs(command):
-    words = command.casefold().split()
-    if (len(words) > 1):
-        return " ".join(words[1:])
+    # Return everything after the command word verbatim so argument case
+    # and internal spacing are preserved (needed for string tag values).
+    parts = command.split(maxsplit=1)
+    if (len(parts) > 1):
+        return parts[1]
     else:
         return ""
     
+def decodeStringValue(value):
+    """
+    Custom string types (e.g. STRING_20, STRING_40) come back from pylogix as
+    raw structure bytes: a 4 byte length (LEN) followed by the character data
+    (DATA) padded with nulls.  Decode that into a plain string so it displays
+    cleanly instead of showing the length prefix, null padding and b'...'
+    quotes.  Returns None when the bytes don't look like a Logix string so the
+    caller can fall back to the raw value (e.g. a genuine UDT).
+    """
+    if not isinstance(value, (bytes, bytearray)):
+        return None
+    if len(value) < 4:
+        return None
+    length = int.from_bytes(value[0:4], "little")
+    if length > len(value) - 4:
+        return None
+    try:
+        text = value[4:4 + length].decode("utf-8")
+    except (UnicodeDecodeError, AttributeError):
+        return None
+    # only treat it as a string if the characters are printable text
+    if any(ord(c) < 0x20 and c not in "\t\r\n" for c in text):
+        return None
+    return text
+
 def getTagValues(tags):
     outData = []
     for tag in tags:
         if len(tag) > 0:
             try:
                 result = comm.Read(tag).Value
+                decoded = decodeStringValue(result)
+                if decoded is not None:
+                    result = decoded
                 if str(result) == "None":
                     result = "!ERROR!"
             except Exception as error:
