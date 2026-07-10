@@ -605,7 +605,18 @@ class PLC(object):
         if resp[2] != 0 and resp[2] != 6:
             return Response(tag_name, None, resp[2])
 
-        data_type = self.KnownTags[base_tag][0]
+        known = self.KnownTags[base_tag]
+        data_type = known[0]
+
+        # for strings, use the structure handle and element size captured
+        # from the tag's read reply so custom STRING_xx types write correctly.
+        # Falls back to the built-in STRING defaults when unknown.
+        if data_type == 0xa0:
+            string_size = known[1] if known[1] else 88
+            structure_handle = known[2] if len(known) > 2 else None
+        else:
+            string_size = 88
+            structure_handle = None
 
         # check if values passed were a list
         if not isinstance(value, (list, tuple)):
@@ -650,7 +661,7 @@ class PLC(object):
             if len(values) > 1:
                 # write requires multiple packets
                 for w in values:
-                    request = self._add_frag_write_service(count, ioi, w, data_type)
+                    request = self._add_frag_write_service(count, ioi, w, data_type, structure_handle, string_size)
                     status, ret_data = self.conn.send(request)
                     self.Offset += len(w) * self.CIPTypes[data_type][0]
             else:
@@ -663,7 +674,7 @@ class PLC(object):
                         request = self._add_mod_write_service(ioi, data_type, high[i], low[i])
                         status, ret_data = self.conn.send(request)
                 else:
-                    request = self._add_write_service(ioi, values[0], data_type)
+                    request = self._add_write_service(ioi, values[0], data_type, structure_handle, string_size)
 
                     status, ret_data = self.conn.send(request)
 
@@ -691,11 +702,18 @@ class PLC(object):
 
             tag_name, base_tag, index = parse_tag_name(wd[0])
 
+            structure_handle = None
+            string_size = 88
             if base_tag in self.KnownTags.keys():
-                data_type = self.KnownTags[base_tag][0]
+                known = self.KnownTags[base_tag]
+                data_type = known[0]
                 dt_size = self.CIPTypes[data_type][0]
                 if data_type == 0xa0:
                     dt_size -= 8
+                    # use the tag's captured string type so custom
+                    # STRING_xx types write correctly
+                    string_size = known[1] if known[1] else 88
+                    structure_handle = known[2] if len(known) > 2 else None
             else:
                 if type(wd[1]) == str:
                     data_type = 0xa0
@@ -746,7 +764,7 @@ class PLC(object):
                     service_segments.extend(temp_segments)
             else:
                 ioi = self._build_ioi(tag_name, data_type)
-                write_service = self._add_write_service(ioi, value, data_type)
+                write_service = self._add_write_service(ioi, value, data_type, structure_handle, string_size)
                 write_values.append((wd[0], value))
                 next_request_size = service_segment_size + rsp_tag_size + 2
 
@@ -1484,9 +1502,13 @@ class PLC(object):
         read_service += pack('<I', self.Offset)
         return read_service
 
-    def _add_write_service(self, ioi, write_data, data_type):
+    def _add_write_service(self, ioi, write_data, data_type, structure_handle=None, data_size=88):
         """
         Add the write command stuff to the tagIOI
+
+        structure_handle/data_size describe the string type being written
+        (captured from the tag's read reply) so custom STRING_xx types write
+        correctly; they default to the built-in STRING values.
         """
         request_service = 0x4D
         request_size = int(len(ioi) / 2)
@@ -1495,7 +1517,8 @@ class PLC(object):
 
         if data_type == 0xa0:
             type_len = 0x02
-            write_service += pack('<BBHH', data_type, type_len, self.StringID, len(write_data))
+            handle = structure_handle if structure_handle is not None else self.StringID
+            write_service += pack('<BBHH', data_type, type_len, handle, len(write_data))
         else:
             type_len = 0x00
             write_service += pack('<BBH', data_type, type_len, len(write_data))
@@ -1504,7 +1527,7 @@ class PLC(object):
             if data_type == 0xca or data_type == 0xcb:
                 value = float(value)
             elif data_type == 0xa0:
-                value = self._make_standard_string(value)
+                value = self._make_standard_string(value, data_size)
             elif data_type == 0xda or data_type == 0xd0:
                 value = self._make_special_string(value)
             try:
@@ -1542,9 +1565,13 @@ class PLC(object):
 
         return write_request
 
-    def _add_frag_write_service(self, count, ioi, write_data, data_type):
+    def _add_frag_write_service(self, count, ioi, write_data, data_type, structure_handle=None, data_size=88):
         """
         Add the fragmented write command stuff to the tagIOI
+
+        structure_handle/data_size describe the string type being written
+        (captured from the tag's read reply) so custom STRING_xx types write
+        correctly; they default to the built-in STRING values.
         """
         path_size = int(len(ioi) / 2)
         service = 0x53
@@ -1552,8 +1579,9 @@ class PLC(object):
         request += ioi
 
         if data_type == 0xa0:
+            handle = structure_handle if structure_handle is not None else self.StringID
             request += pack('<BB', data_type, 0x02)
-            request += pack('<H', self.StringID)
+            request += pack('<H', handle)
         else:
             request += pack('<H', data_type)
         request += pack('<H', count)
@@ -1564,7 +1592,7 @@ class PLC(object):
             if data_type == 0xca or data_type == 0xcb:
                 value = float(value)
             elif data_type == 0xa0:
-                value = self._make_standard_string(value)
+                value = self._make_standard_string(value, data_size)
             elif data_type == 0xda or data_type == 0xd0:
                 value = self._make_special_string(value)
             try:
@@ -1759,10 +1787,16 @@ class PLC(object):
         if status == 0 or status == 6:
             data_type = unpack_from('<B', ret_data, 50)[0]
             if data_type == 0xa0:
+                # a struct/string reply carries the template's structure
+                # handle (2 bytes) right after the data type.  Capturing it
+                # lets writes target the tag's actual string type instead of
+                # the hardcoded StringID, so custom STRING_xx types work.
+                structure_handle = unpack_from('<H', ret_data, 52)[0]
                 data_len = len(ret_data[54:])
+                self.KnownTags[base_tag] = (data_type, data_len, structure_handle)
             else:
                 data_len = len(ret_data[52:])
-            self.KnownTags[base_tag] = (data_type, data_len)
+                self.KnownTags[base_tag] = (data_type, data_len)
             return tag, None, 0
         else:
             return tag, None, status
@@ -1934,18 +1968,28 @@ class PLC(object):
 
         return tag_list
 
-    def _make_standard_string(self, string):
+    def _make_standard_string(self, string, data_size=88):
         """
         String for Compact/Control Logix
+
+        data_size is the total byte size of the string structure element
+        (a 4 byte LEN plus the DATA array).  For the built-in STRING this
+        is 88 (4 + 84).  Passing the size captured from the tag's own read
+        reply lets us write custom string types (STRING_20, STRING_40, etc.)
+        without the caller having to know the type.
         """
+        data_region = data_size - 4
+        # the built-in STRING declares DATA as SINT[82] but pads the
+        # structure to 84 bytes; custom STRING_xx types use the whole region
+        max_chars = 82 if data_size == 88 else data_region
         work = []
-        string = string[:82]
+        string = string[:max_chars]
         temp = pack('<I', len(string)).decode(self.StringEncoding)
         for char in temp:
             work.append(ord(char))
         for char in string:
             work.append(ord(char))
-        for _ in range(len(string), 84):
+        for _ in range(len(string), data_region):
             work.append(0x00)
         return work
 
