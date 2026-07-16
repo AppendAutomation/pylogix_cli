@@ -70,33 +70,34 @@ https://github.com/dmroeder/pylogix
 
 ## Currently Implemented Functions and Commands
 ```
+    pylogix Functions:
+        GetDeviceProperties         - Gets the properties of the connected device.
+        GetModuleProperties <slot>  - Gets the properties of the module in the specified slot.
+        GetPLCTime                  - Returns the PLC time.
+        GetProgramsList             - Returns the list of programs.
+        GetTagList                  - Returns the list of tags in the target PLC.
+        Read <tag>                  - Returns the specified tag's value from the target PLC.
+        SetPLCGateway <ip address>  - Sets the PLC's default gateway address.
+        SetPLCTime                  - Sets the PLC time and time zone to match this computer.
+        Write <tag> <value>         - Sets the specified tag's value in the target PLC.
+
+    pylogix_cli Functions and Commands: (Not standard pylogix commands.)
+        GetFaultCodes               - Gets the Type and Code of the current controller fault.
+        GetFaultInfo                - Gets the Module slot for an IO fault or location for a logic fault.
         Help                        - Displays this list of commands.
         IPAddress <ip address>[,<slot>]
                                     - Sets the IP address (and optional slot) for the target PLC.
-        Quit                        - Leave console application.
-        GetPLCTime                  - Returns the PLC time.
-        SetPLCTime                  - Sets the PLC time and time zone to match this computer.
-        SetPLCGateway <ip address>  - Sets the PLC's default gateway address.
-        GetModuleProperties <slot>  - Gets the properties of the module in the specified slot.
-        GetDeviceProperties         - Gets the properties of the connected device.
-        * GetFaultCodes             - Gets the Type and Code of the current controller fault.
-        * GetFaultInfo              - Gets the Module slot for an IO fault or location for a logic fault.
-        Read <tag>                  - Returns the specified tag's value from the target PLC.
-        Write <tag> <value>         - Sets the specified tag's value in the target PLC.
-        * Sleep <seconds>           - Pauses execution for the given number of seconds.
-        * Wait <tag> <cond> <value> [echo=y] [interval=1] [timeout=<seconds>]
-                                    - Reads <tag> until it satisfies the condition.
-        Version                     - Returns the version of pylogix_cli and pylogix.
-        GetTagList                  - Returns the list of tags in the target PLC.
-        GetProgramsList             - Returns the list of programs.
         Output (Raw | Readable)     - Sets the output format.  Raw is the default.
-        * ReadTagFile <filename> [<outfile>]
+        Quit                        - Leave console application.
+        ReadTagFile <filename> [<outfile>]
                                     - Returns the values of the tags listed in the file.
-        * WriteTagFile <filename>   - Writes the comma delimited "tag, value" pairs from the file.
-        * RunScript <filename>      - Validates and executes a file of console commands.
-        * ValidateScript <filename> - Checks a script file for unrecognized commands.
-
-* - Is not a standard pylogix command.
+        RunScript <filename>        - Validates and executes a file of console commands.
+        Sleep <seconds>             - Pauses execution for the given number of seconds.
+        ValidateScript <filename>   - Checks a script file for unrecognized commands.
+        Version                     - Returns the version of pylogix_cli and pylogix.
+        Wait <tag> <cond> <value> [echo=y] [interval=1] [timeout=<seconds>]
+                                    - Reads <tag> until it satisfies the condition.
+        WriteTagFile <filename>     - Writes the comma delimited "tag, value" pairs from the file.
 ```
 (Commands are not case sensitive.)
 
