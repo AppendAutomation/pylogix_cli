@@ -6,7 +6,7 @@ handy for systems where an end-user does not have the Rockwell software, but nee
 Warning!  PLCs control industrial equipment and writing values to a PLC that is actively operating equipment should be done with great care and is at your own risk.
 
 Click below to download the current standalone executable for Windows 7/10:<br/>
-https://github.com/dhunt84971/pylogix_cli/releases/download/v0.1.10/pylogix_cli.exe 
+https://github.com/dhunt84971/pylogix_cli/releases/download/v0.2.0/pylogix_cli.exe 
 
 
 Execution of the application will take the form of a single command or a shell console application allowing multiple commands to be executed.
@@ -68,7 +68,7 @@ https://github.com/dmroeder/pylogix
 
 **Special thanks to dmroeder and all the contributors that make pylogix possible.**
 
-## Currently Implemented Functions
+## Currently Implemented Functions and Commands
 ```
         Help                        - Displays this list of commands.
         IPAddress <ip address>[,<slot>]
@@ -88,11 +88,20 @@ https://github.com/dmroeder/pylogix
                                     - Reads <tag> until it satisfies the condition.
         Version                     - Returns the version of pylogix_cli and pylogix.
         GetTagList                  - Returns the list of tags in the target PLC.
-        Output (Raw | Readable)     - Sets the output format.  Raw is the default.     
+        GetProgramsList             - Returns the list of programs.
+        Output (Raw | Readable)     - Sets the output format.  Raw is the default.
+        * ReadTagFile <filename> [<outfile>]
+                                    - Returns the values of the tags listed in the file.
+        * WriteTagFile <filename>   - Writes the comma delimited "tag, value" pairs from the file.
+        * RunScript <filename>      - Validates and executes a file of console commands.
+        * ValidateScript <filename> - Checks a script file for unrecognized commands.
 
 * - Is not a standard pylogix command.
 ```
 (Commands are not case sensitive.)
+
+More detail on the multi-tag, wait and script commands is provided in the
+sections below.
 
 ### Multi-Tag Commands:
 Filenames are case sensitive.

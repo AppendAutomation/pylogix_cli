@@ -55,7 +55,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pylogix
 from pylogix.lgx_response import Response
 from pylogix import PLC
-version = "0.1.10"
+version = "0.2.0"
 comm = PLC()
 output_format = "raw"
 output_formats = ["raw", "readable", "minimal"]
