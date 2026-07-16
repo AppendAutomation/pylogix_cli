@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Example pylogix_cli script for the test PLC at 192.168.2.118
+#
+# Run it from the repository root with:
+#     python3 pylogix_cli.py 192.168.2.118 RunScript examples/test_script.txt
+#   - or from inside the interactive console -
+#     pylogix_cli> RunScript examples/test_script.txt
+#
+# Every line below is an ordinary console command.  Blank lines and lines that
+# start with '#' are ignored.  The script is validated before it runs, so a
+# typo in a command name stops it before any value is written to the PLC.
+#
+# The test PLC exposes:
+#     Numbers  - a DINT array with 20 elements (Numbers[0] .. Numbers[19])
+#     Bits     - a DWORD whose individual bits are Bits.0 .. Bits.31
+# ---------------------------------------------------------------------------
+
+# Point at the test PLC (also fine to set this on the command line instead).
+IPAddress 192.168.2.118
+
+Version
+
+# --- Single tag writes into the Numbers DINT array ---------------------------
+Write Numbers[0] 111
+Write Numbers[1] 222
+Write Numbers[2] 333
+
+# Give the PLC a moment before reading the values back.
+Sleep 1
+
+Read Numbers[0]
+Read Numbers[1]
+Read Numbers[2]
+
+# --- Bit write into the Bits DWORD -------------------------------------------
+Write Bits.0 1
+Sleep 0.5
+Read Bits.0
+
+# --- Bulk write from a comma delimited "tag, value" file ---------------------
+WriteTagFile examples/tag_values.csv
+Sleep 1
+
+# --- Read a batch of tags back from a tag list file --------------------------
+ReadTagFile examples/numbers_tags.txt

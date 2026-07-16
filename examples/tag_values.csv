@@ -1,0 +1,8 @@
+# Comma delimited "tag, value" pairs written by the WriteTagFile command.
+# Blank lines and lines beginning with '#' are ignored.
+Numbers[5], 55
+Numbers[6], 66
+Numbers[7], 77
+Numbers[8], 88
+Numbers[9], 99
+Bits.1, 1

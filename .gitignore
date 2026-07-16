@@ -119,3 +119,8 @@ pylogix/testing/
 *.CSV
 *.txt
 *.out
+
+# ...but keep the bundled example scripts and their supporting tag files.
+!examples/
+!examples/*.txt
+!examples/*.csv

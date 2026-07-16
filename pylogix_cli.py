@@ -60,6 +60,9 @@ comm = PLC()
 output_format = "raw"
 output_formats = ["raw", "readable", "minimal"]
 show_timing = False
+# Set True by the Wait command when the user presses 'c' to cancel a running
+# script.  RunScript checks and clears it after each command.
+cancel_requested = False
 
 #region CUSTOM COMMAND CODE
 def get_cip_attribute(plc, class_inst_id, attribute_id, instance_id, offset = 54):
@@ -289,20 +292,288 @@ def readTagFile(args):
         if (show_timing):
             print("Executed in {0:7.3f} seconds.".format(exec_time))
 
+def writeTagValue(tag, value):
+    """
+    Writes a single value to a tag.  Integer-looking values are written as
+    ints; everything else is passed through as-is.  pylogix coerces the value
+    to the tag's actual datatype (e.g. float() for REAL tags), so a numeric
+    string still writes correctly to a REAL tag.  The tag is read first because
+    that initiates the connection and populates the tag's datatype.  Raises on
+    failure so callers can report the error.
+    """
+    comm.Read(tag)  # Always read the tag first since this will initiate the connection.
+    if isInteger(value):
+        return comm.Write(tag, int(value))
+    return comm.Write(tag, value)
+
 def write(args):
     words = args.split(maxsplit=1)  # split tag from value so string values may contain spaces.
     tag, value = words[0], words[1]
-    comm.Read(tag)  # Always read the tag first since this will initiate the connection.
     try:
-        if isInteger(value):
-            ret = comm.Write(tag, int(value))
-        else:
-            ret = comm.Write(tag, value)
+        ret = writeTagValue(tag, value)
     except Exception as e:
         print("ERROR - Could not write value '{0}' to tag '{1}'.  "
               "The value type may not match the tag's datatype.  ({2})".format(value, tag, e))
         return
     print(ret)
+
+def writeTagFile(args):
+    """
+    Writes the tag/value pairs contained in a comma delimited file.  Each line
+    is "tag, value"; blank lines and lines beginning with '#' are ignored so
+    the file may be commented.  Every value is written to its tag and the
+    result of each write is printed.
+    """
+    words = args.split()
+    if len(words) == 0:
+        print("ERROR - Please specify a filename.")
+        return
+    filename = words[0]
+    try:
+        lines = Path(filename).read_text().splitlines()
+    except Exception as error:
+        print("ERROR - Error opening the file {0}. {1}".format(filename, str(error)))
+        return
+    start_time = time.time()
+    for lineNum, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("#"):
+            continue
+        if "," not in stripped:
+            print("Line {0}: ERROR - Expected 'tag, value'.  Skipping '{1}'.".format(lineNum, stripped))
+            continue
+        tag, value = stripped.split(",", 1)
+        tag = tag.strip()
+        value = value.strip()
+        try:
+            print(writeTagValue(tag, value))
+        except Exception as e:
+            print("ERROR - Could not write value '{0}' to tag '{1}'.  "
+                  "The value type may not match the tag's datatype.  ({2})".format(value, tag, e))
+    if (show_timing):
+        print("Executed in {0:7.3f} seconds.".format(time.time() - start_time))
+
+def sleep(args):
+    """
+    Pauses execution for the given number of seconds.  Useful in script files
+    to allow the PLC time to react between commands.  Fractional seconds are
+    allowed, e.g. "Sleep 0.5".
+    """
+    val = args.strip()
+    try:
+        seconds = float(val)
+    except ValueError:
+        print("ERROR - Invalid argument.  Please specify the number of seconds to sleep.")
+        return
+    if seconds < 0:
+        print("ERROR - The number of seconds to sleep must not be negative.")
+        return
+    time.sleep(seconds)
+
+WAIT_CONDITIONALS = (">", "<", ">=", "<=", "==", "!=")
+
+def wait(args):
+    """
+    Repeatedly reads a tag until it satisfies a condition, then returns.
+
+        wait <tag> <conditional> <value> [echo=y] [interval=1] [timeout=<seconds>]
+
+    conditional is one of >, <, >=, <=, ==, !=.  The optional arguments may be
+    given in any order:
+        echo=y|n     - echo each read to the terminal (default y)
+        interval=<s> - seconds between reads (default 1)
+        timeout=<s>  - give up after this many seconds (default: no timeout).
+                       A bare number is also accepted as the timeout.
+
+    While waiting the user may press 'q' to stop waiting (and continue) or 'c'
+    to cancel a running script.
+    """
+    global cancel_requested
+    words = args.split()
+    if len(words) < 3:
+        print("ERROR - Usage: wait <tag> <conditional> <value> "
+              "[echo=y] [interval=1] [timeout=<seconds>]")
+        return
+    tag, conditional, target = words[0], words[1], words[2]
+    if conditional not in WAIT_CONDITIONALS:
+        print("ERROR - Invalid conditional '{0}'.  Use one of {1}.".format(
+            conditional, ", ".join(WAIT_CONDITIONALS)))
+        return
+
+    # defaults for the optional arguments
+    echo = True
+    interval = 1.0
+    timeout = None
+    for opt in words[3:]:
+        key, sep, val = opt.partition("=")
+        key = key.casefold()
+        if not sep:
+            # a bare token is treated as the timeout, per "[timeout]"
+            try:
+                timeout = float(opt)
+            except ValueError:
+                print("ERROR - Unrecognized option '{0}'.".format(opt))
+                return
+            continue
+        if key == "echo":
+            echo = val.strip().casefold() in ("y", "yes", "true", "1", "on")
+        elif key == "interval":
+            try:
+                interval = float(val)
+            except ValueError:
+                print("ERROR - Invalid interval '{0}'.".format(val))
+                return
+        elif key == "timeout":
+            try:
+                timeout = float(val)
+            except ValueError:
+                print("ERROR - Invalid timeout '{0}'.".format(val))
+                return
+        else:
+            print("ERROR - Unrecognized option '{0}'.".format(opt))
+            return
+
+    if interval < 0:
+        print("ERROR - The interval must not be negative.")
+        return
+
+    if sys.stdin.isatty():
+        print("Waiting for {0} {1} {2} ... (press 'q' to skip, 'c' to cancel script)".format(
+            tag, conditional, target), flush=True)
+
+    start_time = time.time()
+    old_term = enterCbreak()
+    try:
+        while True:
+            ret = comm.Read(tag)
+            current = ret.Value
+            decoded = decodeStringValue(current)
+            if decoded is not None:
+                current = decoded
+                ret.Value = decoded
+            if echo:
+                # flush so echoed reads appear in real time even when output is
+                # redirected to a file or pipe during a long wait.
+                print(ret, flush=True)
+
+            if current is not None:
+                current_cmp, target_cmp = coerceForCompare(current, target)
+                if evalConditional(current_cmp, conditional, target_cmp):
+                    print("Condition met: {0} {1} {2} (current {3}).".format(
+                        tag, conditional, target, current), flush=True)
+                    return
+
+            if timeout is not None and (time.time() - start_time) >= timeout:
+                print("Wait timed out after {0:g} seconds; condition {1} {2} {3} not met.".format(
+                    timeout, tag, conditional, target), flush=True)
+                return
+
+            key = sleepWithKey(interval)
+            if key == "q":
+                print("Wait stopped by user.", flush=True)
+                return
+            elif key == "c":
+                print("Script cancelled by user.", flush=True)
+                cancel_requested = True
+                return
+    finally:
+        exitCbreak(old_term)
+
+def validateScriptLines(lines):
+    """
+    Checks that every non-blank, non-comment line in a script begins with a
+    recognized command.  Returns a list of human readable error strings; an
+    empty list means the script is valid.
+    """
+    errors = []
+    for lineNum, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("#"):
+            continue
+        word = stripped.split()[0]
+        cmd = word.casefold()
+        # quit/exit are handled by the command loop, not parseCommand, but are
+        # valid inside a script where they simply stop execution.
+        if cmd in ("quit", "exit"):
+            continue
+        if cmd not in COMMANDS:
+            errors.append("Line {0}: Unrecognized command '{1}'.".format(lineNum, word))
+    return errors
+
+def readScriptLines(filename):
+    """
+    Reads a script file and returns its lines, or None if the file could not
+    be opened (an error is printed in that case).
+    """
+    try:
+        return Path(filename).read_text().splitlines()
+    except Exception as error:
+        print("ERROR - Error opening the file {0}. {1}".format(filename, str(error)))
+        return None
+
+def validateScript(args):
+    """
+    Validates a script file without executing it, reporting any lines that do
+    not begin with a recognized command.
+    """
+    words = args.split()
+    if len(words) == 0:
+        print("ERROR - Please specify a script filename.")
+        return
+    filename = words[0]
+    lines = readScriptLines(filename)
+    if lines is None:
+        return
+    errors = validateScriptLines(lines)
+    if errors:
+        print("Script {0} is INVALID:".format(filename))
+        for err in errors:
+            print("  " + err)
+    else:
+        print("Script {0} is valid.".format(filename))
+
+def runScript(args):
+    """
+    Validates and then executes a script file.  Each line is a command exactly
+    as it would be typed in the interactive console.  Blank lines and lines
+    beginning with '#' are ignored so scripts may be commented.  The script is
+    validated first and is not executed at all if any command is unrecognized.
+    A quit/exit line stops the script early, as does the user pressing 'c'
+    during a Wait command.
+    """
+    global cancel_requested
+    words = args.split()
+    if len(words) == 0:
+        print("ERROR - Please specify a script filename.")
+        return
+    filename = words[0]
+    lines = readScriptLines(filename)
+    if lines is None:
+        return
+    errors = validateScriptLines(lines)
+    if errors:
+        print("ERROR - Script validation failed for {0}:".format(filename))
+        for err in errors:
+            print("  " + err)
+        print("Script not executed.")
+        return
+    cancel_requested = False
+    start_time = time.time()
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("#"):
+            continue
+        if stripped.casefold() in ("quit", "exit"):
+            break
+        # echo the command so the script's progress is visible
+        print("pylogix_cli> " + stripped)
+        parseCommand(stripped)
+        if cancel_requested:
+            print("Script {0} cancelled.".format(filename))
+            cancel_requested = False
+            break
+    if (show_timing):
+        print("Script {0} executed in {1:7.3f} seconds.".format(filename, time.time() - start_time))
 
 def getVersion(args):
     print("pylogix_cli v" + version + ", pylogix v" + pylogix.__version__)
@@ -350,55 +621,66 @@ def getHelp(args):
         GetFaultInfo                - Gets the Module slot for an IO fault or location for a logic fault.
         Read <tag>                  - Returns the specified tag's value from the target PLC.
         Write <tag> <value>         - Sets the specified tag's value in the target PLC.
+        Sleep <seconds>             - Pauses execution for the given number of seconds.
+        Wait <tag> <cond> <value> [echo=y] [interval=1] [timeout=<seconds>]
+                                    - Reads <tag> until it <cond> <value>, where <cond> is
+                                      one of >, <, >=, <=, ==, !=.  Press 'q' to skip the
+                                      wait or 'c' to cancel a running script.
         Version                     - Returns the version of pylogix_cli and pylogix.
         GetTagList                  - Returns the list of tags in the target PLC.
         GetProgramsList             - Returns the list of programs.
-        Output (Raw | Readable)     - Sets the output format.  Raw is the default.        
-    
+        Output (Raw | Readable)     - Sets the output format.  Raw is the default.
+
     Multi-Tag Commands: (Filenames are case sensitive.)
         ReadTagFile <filename> [<outfile>]
             - Returns the values of the tags from the file.
-          
+        WriteTagFile <filename>
+            - Writes the comma delimited "tag, value" pairs from the file.
+
+    Script Commands: (Filenames are case sensitive.)
+        RunScript <filename>
+            - Validates then executes a file of console commands, one per line.
+        ValidateScript <filename>
+            - Checks a script file for unrecognized commands without executing it.
+
     ''')
 
 #endregion CONSOLE COMMAND DEFINITIONS
 
 #region COMMAND LOOP
+# Maps a (case-insensitive) command word to its handler.  Every handler takes
+# a single argument: the text that follows the command word.  This table is
+# used both to dispatch commands and to validate script files.
+COMMANDS = {
+    "help": getHelp,
+    "ipaddress": ipAddress,
+    "getplctime": getPLCTime,
+    "setplctime": setPLCTime,
+    "setplcgateway": setPLCGateway,
+    "getdeviceproperties": getDeviceProperties,
+    "getmoduleproperties": getModuleProperties,
+    "getfaultcodes": getFaultCodes,
+    "getfaultinfo": getFaultInfo,
+    "read": read,
+    "readtagfile": readTagFile,
+    "write": write,
+    "writetagfile": writeTagFile,
+    "sleep": sleep,
+    "wait": wait,
+    "runscript": runScript,
+    "validatescript": validateScript,
+    "version": getVersion,
+    "gettaglist": getTagList,
+    "getprogramslist": getProgramsList,
+    "output": output,
+}
+
 def parseCommand(command):
-    words = command.casefold().split()
+    words = command.split()
     if (len(words) > 0):
-        if (words[0] == "help"):
-            getHelp(command)
-        elif (words[0] == "ipaddress"):
-            ipAddress(getAdditionalArgs(command))
-        elif (words[0] == "getplctime"):
-            getPLCTime(getAdditionalArgs(command))
-        elif (words[0] == "setplctime"):
-            setPLCTime(getAdditionalArgs(command))
-        elif (words[0] == "setplcgateway"):
-            setPLCGateway(getAdditionalArgs(command))
-        elif (words[0] == "getdeviceproperties"):
-            getDeviceProperties(getAdditionalArgs(command))
-        elif (words[0] == "getmoduleproperties"):
-            getModuleProperties(getAdditionalArgs(command))
-        elif (words[0] == "getfaultcodes"):
-            getFaultCodes(getAdditionalArgs(command))
-        elif (words[0] == "getfaultinfo"):
-            getFaultInfo(getAdditionalArgs(command))
-        elif (words[0] == "read"):
-            read(getAdditionalArgs(command))
-        elif (words[0] == "readtagfile"):
-            readTagFile(getAdditionalArgs(command))
-        elif (words[0] == "write"):
-            write(getAdditionalArgs(command))
-        elif (words[0] == "version"):
-            getVersion(getAdditionalArgs(command))
-        elif (words[0] == "gettaglist"):
-            getTagList(getAdditionalArgs(command))
-        elif (words[0] == "getprogramslist"):
-            getProgramsList(getAdditionalArgs(command))
-        elif (words[0] == "output"):
-            output(getAdditionalArgs(command))
+        handler = COMMANDS.get(words[0].casefold())
+        if handler is not None:
+            handler(getAdditionalArgs(command))
         else:
             print("ERROR - Unrecognized command.  Enter Help for a list of commands.")
 
@@ -502,6 +784,114 @@ def isInteger(s):
         return s[1:].isdigit()
     return s.isdigit()
 
+def coerceForCompare(current, target):
+    """
+    Returns (current, target) coerced to comparable types so a value read from
+    the PLC can be compared against the string target given on the command
+    line.  Booleans are compared as booleans, numbers as floats, and anything
+    else as strings.  Note bool must be checked before int because in Python a
+    bool is an int.
+    """
+    if isinstance(current, bool):
+        truthy = target.strip().casefold() in ("1", "true", "y", "yes", "on")
+        return current, truthy
+    if isinstance(current, (int, float)):
+        try:
+            return current, float(target)
+        except (ValueError, TypeError):
+            return str(current), target
+    return str(current), target
+
+def evalConditional(current, conditional, target):
+    """
+    Evaluates "current <conditional> target" for the supported operators.
+    Returns False (rather than raising) when the two values can't be compared.
+    """
+    try:
+        if conditional == ">":
+            return current > target
+        elif conditional == "<":
+            return current < target
+        elif conditional == ">=":
+            return current >= target
+        elif conditional == "<=":
+            return current <= target
+        elif conditional == "==":
+            return current == target
+        elif conditional == "!=":
+            return current != target
+    except TypeError:
+        return False
+    return False
+
+def getKeyNonBlocking():
+    """
+    Returns a single character if a key is waiting on stdin, else None.  Works
+    on Windows (msvcrt) and Unix (select), and returns None when stdin is not
+    an interactive terminal (e.g. commands piped in from a file) so it never
+    blocks.  Unix callers must first put the terminal in cbreak mode (see
+    enterCbreak) so single keys are delivered without waiting for Enter.
+    """
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if msvcrt.kbhit():
+                return msvcrt.getch().decode(errors="ignore")
+            return None
+        if not sys.stdin.isatty():
+            return None
+        import select
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if ready:
+            return sys.stdin.read(1)
+        return None
+    except Exception:
+        return None
+
+def enterCbreak():
+    """
+    Puts the Unix terminal into cbreak mode so getKeyNonBlocking can read one
+    key at a time without the user pressing Enter.  Returns the previous
+    terminal settings (to be passed to exitCbreak) or None when nothing was
+    changed (Windows, or stdin is not a terminal).
+    """
+    if os.name == "nt" or not sys.stdin.isatty():
+        return None
+    try:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        return old
+    except Exception:
+        return None
+
+def exitCbreak(old):
+    """Restores the terminal settings saved by enterCbreak."""
+    if old is None:
+        return
+    try:
+        import termios
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old)
+    except Exception:
+        pass
+
+def sleepWithKey(seconds):
+    """
+    Sleeps up to `seconds`, returning early with the (lower-cased) key the user
+    pressed, or None if the full time elapsed with no key.  Polls in small
+    slices so a keypress is noticed promptly.
+    """
+    end = time.time() + seconds
+    while True:
+        key = getKeyNonBlocking()
+        if key:
+            return key.lower()
+        remaining = end - time.time()
+        if remaining <= 0:
+            return None
+        time.sleep(min(0.05, remaining))
+
 #endregion HELPER FUNCTIONS
 
 #region MAIN
@@ -517,6 +907,12 @@ def main():
                 parseCommand(" ".join(arguments[2:]))
             else:
                 commandLoop()
+        else:
+            # The first argument isn't an IP address, so treat the arguments as
+            # a command.  This lets a self-contained script that sets its own
+            # IPAddress be run directly, e.g.
+            #     pylogix_cli RunScript examples/test_script.txt
+            parseCommand(" ".join(arguments[1:]))
     else:
         commandLoop()
     comm.Close()
