@@ -1,0 +1,18 @@
+# Demonstrates the Wait command and cancelling a script with 'c'.
+#
+#   pylogix_cli 192.168.2.118 RunScript examples/wait_test.txt
+#
+# The test PLC increments Numbers[0], so this waits for it to climb past a
+# threshold, then continues.  The second Wait below waits for a value the PLC
+# never reaches, giving you a chance to press 'c' to cancel the whole script
+# (the final Write is then skipped) or 'q' to skip just the wait and continue.
+IPAddress 192.168.2.118
+
+# Wait for the free-running counter to pass 5, echoing each read.
+Wait Numbers[0] > 5 interval=0.5 timeout=30
+
+# This value is never reached - press 'q' to skip or 'c' to cancel the script.
+Wait Numbers[16] == 999 interval=1
+
+# This line only runs if the wait above was skipped with 'q', not cancelled.
+Write Numbers[16] 12345

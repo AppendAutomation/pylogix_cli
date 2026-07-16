@@ -83,6 +83,9 @@ https://github.com/dmroeder/pylogix
         * GetFaultInfo              - Gets the Module slot for an IO fault or location for a logic fault.
         Read <tag>                  - Returns the specified tag's value from the target PLC.
         Write <tag> <value>         - Sets the specified tag's value in the target PLC.
+        * Sleep <seconds>           - Pauses execution for the given number of seconds.
+        * Wait <tag> <cond> <value> [echo=y] [interval=1] [timeout=<seconds>]
+                                    - Reads <tag> until it satisfies the condition.
         Version                     - Returns the version of pylogix_cli and pylogix.
         GetTagList                  - Returns the list of tags in the target PLC.
         Output (Raw | Readable)     - Sets the output format.  Raw is the default.     
@@ -94,7 +97,72 @@ https://github.com/dmroeder/pylogix
 ### Multi-Tag Commands:
 Filenames are case sensitive.
 + ```ReadTagFile <filename> [<outfile>]```
-    - Returns the values of the tags from the file.
+    - Returns the values of the tags from the file.  The file lists one tag
+      per line.
++ ```WriteTagFile <filename>```
+    - Writes the comma delimited `tag, value` pairs from the file, one pair
+      per line.  Blank lines and lines starting with `#` are ignored, so the
+      file may be commented.  For example:
+      ```
+      # zero out the setpoints
+      Numbers[5], 55
+      Bits.1, 1
+      ```
+
+### Waiting on a Condition:
+The `Wait` command polls a tag until it satisfies a condition, then returns.
+This is handy in scripts for holding until the PLC reaches a state before
+continuing.
+```
+Wait <tag> <conditional> <value> [echo=y] [interval=1] [timeout=<seconds>]
+```
++ `tag` - the tag to read and test.
++ `conditional` - one of `>`, `<`, `>=`, `<=`, `==`, `!=`.
++ `value` - the value the tag is compared against.
+
+The optional arguments may appear in any order:
++ `echo=y|n` - echo each read to the terminal (default `y`).
++ `interval=<seconds>` - seconds between reads (default `1`).
++ `timeout=<seconds>` - give up after this many seconds and continue
+  (default: wait forever).  A bare trailing number is also accepted as the
+  timeout, e.g. `Wait Numbers[0] >= 100 echo=n 30`.
+
+While a `Wait` is running you can press:
++ `q` - stop waiting and continue (skip just this wait).
++ `c` - cancel the running script (the rest of the script is not executed).
+
+For example, wait up to 60 seconds (checking twice a second) for a level tag
+to reach its setpoint:
+```
+Wait Tank_Level >= 750 interval=0.5 timeout=60
+```
+
+### Script Commands:
+Filenames are case sensitive.
++ ```RunScript <filename>```
+    - Validates and then executes a script file.  Each line is a console
+      command exactly as it would be typed at the `pylogix_cli>` prompt.
+      Blank lines and lines beginning with `#` are ignored.  The script is
+      validated first, so if any line contains an unrecognized command the
+      script is reported and **not executed at all** (nothing is written to the
+      PLC).  A `quit`/`exit` line stops the script early.
++ ```ValidateScript <filename>```
+    - Checks a script file for unrecognized commands and reports any problems
+      without executing it or touching the PLC.
+
+Because a script can set its own target with the `IPAddress` command, a
+self-contained script can be run directly without specifying an IP on the
+command line:
+```
+pylogix_cli RunScript examples/test_script.txt
+```
+Or from the interactive console:
+```
+pylogix_cli 192.168.1.10
+pylogix_cli> RunScript examples/test_script.txt
+```
+A worked example script (`examples/test_script.txt`) together with its
+supporting tag files is provided in the [`examples/`](examples/) folder.
 
 ## Development Environment
 A copy of the pylogix library is vendored in this repository (in the `pylogix/`

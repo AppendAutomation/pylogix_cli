@@ -1,0 +1,10 @@
+Numbers[0]
+Numbers[1]
+Numbers[2]
+Numbers[5]
+Numbers[6]
+Numbers[7]
+Numbers[8]
+Numbers[9]
+Bits.0
+Bits.1
