@@ -388,6 +388,8 @@ class PLC(object):
                 else:
                     request = self._add_partial_read_service(ioi, count)
                 status, ret_data = self.conn.send(request)
+                if not ret_data:
+                    return Response(tag_name, None, status)
                 data = ret_data[50 + pad:]
                 self.Offset += len(data)
                 req += data
@@ -1070,6 +1072,8 @@ class PLC(object):
             for u in unique:
                 if u.DataTypeValue not in self.UDT.keys():
                     temp = self._get_template_attribute(u.DataTypeValue)
+                    if not temp:
+                        continue
 
                     block = temp[46:]
                     if len(block) > 24:
@@ -1084,6 +1088,8 @@ class PLC(object):
             unique = []
             for key, value in iter_template.items():
                 t = self._get_template(key, value[0])
+                if not t:
+                    continue
                 member_count = value[2]
                 size = member_count * 8
                 p = t[50:]
@@ -1173,6 +1179,8 @@ class PLC(object):
             packet_data = pack("<IH", part_offset, remaining)
             request = self._cip_message(0x4c, 0x6c, instance, None, packet_data)
             status, ret_data = self.conn.send(request)
+            if not ret_data:
+                break
             if status == 6:
                 status = 0
             if len(data):
@@ -1205,6 +1213,8 @@ class PLC(object):
 
         request = self._cip_message(0x01, 0x01, 0x01)
         status, ret_data = self.conn.send(request, False, slot)
+        if not ret_data:
+            return Response(None, Device(), status)
         pad = pack('<I', 0x00)
         ret_data = pad + ret_data
 
@@ -1224,6 +1234,8 @@ class PLC(object):
 
         request = self._cip_message(0x01, 0x01, 0x01)
         status, ret_data = self.conn.send(request, False)
+        if not ret_data:
+            return Response(None, Device(), status)
         pad = pack('<I', 0x00)
         ret_data = pad + ret_data
 

@@ -46,6 +46,7 @@ class Connection(object):
         self._ot_connection_id = 0
         self._to_connection_id = 0
         self._registered = False
+        self._retrying = False
         self._serial_number = 0
         self._session_handle = 0x0000
         self._sequence_counter = 1
@@ -61,6 +62,35 @@ class Connection(object):
         """
         Send the request to the PLC
         Return the status and data
+
+        A PLC closes a connection it considers idle and nothing announces
+        it, so the first request after a pause lands on a dead socket and
+        comes back as a connection failure (status 1) even though the PLC
+        is perfectly reachable.  The idle window can be short - a 1769-L33ER
+        simulator drops the connection after about 10 seconds, well ahead of
+        the ~67s the Forward Open asks for - so re-open the connection and
+        send the request once more instead of handing the caller an error it
+        would only have to retry itself.
+        """
+        status, ret_data = self._send(request, connected, slot)
+
+        # ret_data is None only when the exchange itself failed (socket error
+        # or no reply), which is the stale connection case.  A request written
+        # to a connection the PLC has already closed is never processed, so
+        # sending it again is safe rather than a duplicate operation.
+        if ret_data is None and not self._retrying:
+            self._retrying = True
+            try:
+                if self._reconnect(connected):
+                    status, ret_data = self._send(request, connected, slot)
+            finally:
+                self._retrying = False
+
+        return status, ret_data
+
+    def _send(self, request, connected, slot):
+        """
+        Frame the request and exchange it with the PLC
         """
         if connected:
             eip_header = self._build_eip_header(request)
@@ -95,6 +125,18 @@ class Connection(object):
         Close the connection
         """
         self._close_connection()
+
+    def _reconnect(self, connected):
+        """
+        Tear down a connection that failed and open a fresh one.  Returns
+        True when the new connection is ready to carry a request.  A PLC that
+        is genuinely unreachable fails here, so the caller reports the
+        original error instead of retrying forever.
+        """
+        self._close_connection()
+        self._connected = False
+        self._registered = False
+        return self._connect(connected)[0]
 
     def _connect(self, connected):
         """
